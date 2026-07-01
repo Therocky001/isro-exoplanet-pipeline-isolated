@@ -1,5 +1,6 @@
 import logging
 import concurrent.futures
+from pathlib import Path
 from typing import List, Dict, Any, Optional
 from pipeline.data_models import PipelineResult, TransitParameters
 from pipeline.ingestion import DataIngestion
@@ -22,6 +23,10 @@ class ExoplanetPipeline:
         self.bls_module = BLSPeriodogramModule()
         self.prep_pipeline = PreprocessingPipeline()
         self.classifier = DualHeadedClassifier()
+        checkpoint_path = Path(model_checkpoint)
+        if checkpoint_path.exists():
+            loaded_classifier, _ = DualHeadedClassifier.load_from_checkpoint(checkpoint_path)
+            self.classifier = loaded_classifier
         self.physics_engine = TransitPhysicsModeler(r_star=1.0, m_star=1.0) # Assume solar-type star baseline
         
         logger.info("Pipeline modules initialized successfully.")
@@ -57,11 +62,11 @@ class ExoplanetPipeline:
                     depth=candidate.depth,
                     duration=candidate.duration
                 )
-                return PipelineResult(status="planet", transit_params=params, bls_snr=snr)
+                return PipelineResult(status="planet", transit_params=params, bls_snr=snr, class_probs=prob_dict)
             elif best_label == "eclipsing_binary":
-                return PipelineResult(status="eclipsing_binary", bls_snr=snr)
+                return PipelineResult(status="eclipsing_binary", bls_snr=snr, class_probs=prob_dict)
             else:
-                return PipelineResult(status="blend_noise", bls_snr=snr)
+                return PipelineResult(status="blend_noise", bls_snr=snr, class_probs=prob_dict)
                 
         except Exception as e:
             logger.error(f"Pipeline error on target {target_id}: {str(e)}")

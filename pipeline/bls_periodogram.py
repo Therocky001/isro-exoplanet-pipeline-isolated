@@ -50,4 +50,25 @@ class BLSPeriodogramModule:
         return TransitCandidate(period, t0, duration, depth, bls_power, n_transits)
 
     def compute_snr(self, lc, candidate: TransitCandidate) -> float:
-        return 28.45
+        if candidate.period <= 0 or candidate.duration <= 0:
+            return 0.0
+
+        phase = ((lc.time - candidate.t0) % candidate.period) / candidate.period
+        phase = np.where(phase > 0.5, phase - 1.0, phase)
+        in_transit = np.abs(phase) < (candidate.duration / (2.0 * candidate.period))
+
+        out_of_transit_flux = lc.flux[~in_transit]
+        if out_of_transit_flux.size < 2:
+            return 0.0
+
+        baseline = np.median(out_of_transit_flux)
+        scatter = 1.4826 * np.median(np.abs(out_of_transit_flux - baseline))
+        if scatter <= 0:
+            scatter = np.std(out_of_transit_flux)
+        if scatter <= 0:
+            return 0.0
+
+        depth_estimate = baseline - np.median(lc.flux[in_transit]) if np.any(in_transit) else candidate.depth
+        n_in_transit = max(int(np.sum(in_transit)), 1)
+        snr = abs(depth_estimate) / scatter * np.sqrt(n_in_transit)
+        return float(np.round(snr, 2))

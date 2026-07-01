@@ -1,44 +1,39 @@
-import os
-import sys
-import logging
+from pipeline.catalog_parser import CatalogDataEngine
+from pipeline.data_models import PipelineResult
 from pipeline.pipeline import ExoplanetPipeline
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    handlers=[logging.StreamHandler(sys.stdout)]
-)
-logger = logging.getLogger("MainRunner")
+def run_target_pipeline(
+    target_id: str,
+    filtered_index_path: str = "output/filtered_index.csv",
+    checkpoint_path: str = "output/exoplanet_classifier.pt",
+) -> PipelineResult:
+    """
+    End-to-end execution flow for a single target TIC ID.
+    """
+    print("\n" + "=" * 60)
+    print(f"📡 Processing Target: {target_id}")
+    print("=" * 60)
+    
+    # 1. DuckDB Metadata Extraction
+    db_engine = CatalogDataEngine()
+    try:
+        stellar_meta = db_engine.get_stellar_metadata(target_id, filtered_index_path)
+        print(f"✅ DuckDB Target Match: Rad={stellar_meta.stellar_radius} R_sun, Mass={stellar_meta.stellar_mass} M_sun, logg={stellar_meta.logg}")
+    except Exception as e:
+        print(f"❌ Metadata Extraction Failed: {str(e)}")
+        return PipelineResult(status="pipeline_error")
 
-def main():
-    logger.info("Initializing Team Nakshathra Automated Batch Pipeline...")
-    
-    pipeline = ExoplanetPipeline(model_checkpoint="checkpoints/weights.pth")
-    
-    batch_targets = [
-        {"target_id": "TIC 261136679"},
-        {"target_id": "TIC 147551061"},
-        {"target_id": "TIC 278779532"}
-    ]
-    
-    print("\n" + "="*40)
-    print("      BATCH RUN EXECUTION SUMMARY      ")
-    print("="*40)
-    
-    for target in batch_targets:
-        res = pipeline.run(target["target_id"])
-        
-        if res.status == "planet" and res.transit_params:
-            p = res.transit_params
-            print(f"\n✨ Target: {target['target_id']} ---> STATUS: {res.status.upper()}")
-            print(f"   • Orbital Period   : {p.period:.4f} Days")
-            print(f"   • Semi-Major Axis  : {p.r_hat['semi_major_axis_au']:.4f} AU")
-            print(f"   • Planet Radius    : {p.r_hat['radius_earth']:.2f} Earth Radii")
-            print(f"   • Transit Depth    : {p.transit_depth * 100:.3f}%")
-        else:
-            print(f"❌ Target: {target['target_id']} ---> Pipeline Status: {res.status}")
-            
-    print("\n" + "="*40)
+    print("🧠 Running shared ExoplanetPipeline orchestration...")
+    pipeline = ExoplanetPipeline(model_checkpoint=checkpoint_path, output_dir="output")
+    result = pipeline.run(target_id)
+
+    if result.status != "pipeline_error" and result.transit_params is not None:
+        print(f"🎯 Neural Classification: {result.status.upper()} (Confidence: {max(result.class_probs.values()) * 100:.1f}%)")
+        print(f"🔭 BLS Significance: {result.bls_snr:.2f} σ")
+
+    return result
 
 if __name__ == "__main__":
-    main()
+    test_target = "TIC 80423805"
+    result = run_target_pipeline(test_target)
+    print(f"\n🎯 Pipeline Execution Result: STATUS = {result.status} | BLS_SNR = {result.bls_snr}")
